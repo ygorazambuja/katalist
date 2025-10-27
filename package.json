@@ -1,0 +1,39 @@
+{
+	"name": "katalist",
+	"type": "module",
+	"private": true,
+	"devDependencies": {
+		"@types/bun": "latest",
+		"bun-plugin-dts": "^0.3.0"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"exports": {
+		"types": "./dist/index.d.ts",
+		"import": "./dist/index.js",
+		"require": "./dist/index.cjs"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "bun run build.ts",
+		"prepublishOnly": "bun run build"
+	},
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"dependencies": {
+		"@biomejs/biome": "^2.2.6",
+		"@biomejs/js-api": "^3.0.0",
+		"@biomejs/wasm-nodejs": "^2.2.6",
+		"generate-schema": "^2.6.0",
+		"json-schema-to-zod": "^2.6.1",
+		"ky": "^1.12.0",
+		"pino": "^10.0.0",
+		"prettier": "^3.6.2",
+		"ts-morph": "^27.0.2",
+		"zod": "^4.1.12"
+	}
+}
