@@ -4,7 +4,7 @@ import { jsonSchemaToZod } from "json-schema-to-zod";
 import { format } from "prettier";
 
 export const jsonToZodSchema = (json: unknown, title: string) => {
-  const jsonSchema = jsontoJsonSchema(json as Record<string, unknown>, title);
+  const jsonSchema = jsontoJsonSchema(json, title);
   return jsonSchemaToZodSchema(jsonSchema);
 };
 
@@ -32,9 +32,10 @@ export const readJsonFile = async (
 };
 
 export const jsontoJsonSchema = (
-  json: Record<string, unknown>,
+  json: unknown,
   title: string
 ) => {
+  // @ts-expect-error - generate-schema can handle arrays but TypeScript typing doesn't reflect that
   const jsonSchema = generateSchema.json(json);
 
   jsonSchema.title = title;

@@ -4,8 +4,9 @@
 Katalist is a TypeScript library that simplifies HTTP client development by automatically generating Zod schemas from API responses. It provides a fluent API for making HTTP requests while handling type safety and schema generation.
 
 ## Core Functionality
-- **HTTP Client Wrapper**: `katalist()` returns an object with HTTP methods (`get`, etc.)
+- **HTTP Client Wrapper**: `katalist()` returns an object with HTTP methods (`get`, `post`, `put`, `delete`)
 - **Automatic Schema Generation**: Intercepts API responses and generates Zod schemas
+- **Input Schema Generation**: Generates schemas for request bodies (POST/PUT)
 - **Code Transformation**: Uses AST manipulation to add types and clean up generated code
 - **Bun-First Architecture**: Built specifically for Bun runtime using its native APIs
 
@@ -35,13 +36,40 @@ Katalist is a TypeScript library that simplifies HTTP client development by auto
 ```typescript
 // Schema generation during development
 const kat = katalist();
+
+// GET request with response schema generation
 const response = await kat.get(url, {
   generateSchema: true,
   interfaceName: "User"
 });
 
+// POST request with both input and output schema generation
+const createResponse = await kat.post(url, newUserData, {
+  generateInputSchema: true,
+  inputInterfaceName: "CreateUserInput",
+  generateSchema: true,
+  interfaceName: "User"
+});
+
+// PUT request with both input and output schema generation
+const updateResponse = await kat.put(url, updateData, {
+  generateInputSchema: true,
+  inputInterfaceName: "UpdateUserInput",
+  generateSchema: true,
+  interfaceName: "User"
+});
+
+// DELETE request with response schema generation
+const deleteResponse = await kat.delete(url, {
+  generateSchema: true,
+  interfaceName: "DeleteResult"
+});
+
 // Production code (after transformation)
 const response = await kat.get<UserSchemaType>(url);
+const createResponse = await kat.post<UserSchemaType>(url, data);
+const updateResponse = await kat.put<UserSchemaType>(url, data);
+const deleteResponse = await kat.delete<DeleteResult>(url);
 ```
 
 ## Build & Run
@@ -62,3 +90,36 @@ const response = await kat.get<UserSchemaType>(url);
 - **Type-First**: All HTTP calls are fully typed
 - **Automatic**: Minimal developer intervention required
 - **Bun Native**: Leverages Bun's performance and APIs
+
+## Debugging & Development Insights
+
+### Stack Trace Analysis for File Path Detection
+- **Challenge**: When parsing stack traces to detect caller file paths, regex patterns can capture incorrect paths (e.g., `./(file://path/to/file)`)
+- **Solution**: Use precise regex patterns and filter out library-internal files (`katalist`, `ts-morph`, `ky`, etc.)
+- **Pattern**: Look for the first file path outside the library ecosystem in consuming projects
+- **Testing**: Always test with external consuming projects, not just isolated library tests
+
+### Variable Name Flexibility in AST Transformations
+- **Challenge**: Hardcoded variable name assumptions (e.g., expecting `kat.get()`) break when users use different variable names
+- **Solution**: Focus on structural patterns (method calls with specific options) rather than variable naming
+- **Pattern**: Detect `generateSchema: true` and `interfaceName` properties instead of specific object names
+
+### Import Management During Code Transformation
+- **Challenge**: Adding type parameters without corresponding imports leads to compilation errors
+- **Solution**: Always add necessary type imports when transforming code, checking for existing imports first
+- **Pattern**: Use relative paths from source file to `http-schemas/` directory for proper import resolution
+
+### Error Handling in Runtime Transformations
+- **Challenge**: Silent failures during development make debugging difficult
+- **Solution**: Add logging during development but handle errors gracefully in production
+- **Pattern**: Use try-catch blocks with meaningful error messages for debugging, but don't break runtime execution
+
+### Type Safety in AST Manipulation
+- **Challenge**: TypeScript's strict null checking can cause compilation errors in transformation logic
+- **Solution**: Add proper type guards and null checks when accessing AST node properties
+- **Pattern**: Use `&&` operators and explicit null checks before accessing array elements or object properties
+
+### Cross-Project Compatibility
+- **Challenge**: Library works in isolation but fails when consumed by other projects
+- **Solution**: Test with realistic consumption patterns, including different directory structures
+- **Pattern**: Use relative path calculations from source file to generated schemas, not absolute assumptions

@@ -106,14 +106,14 @@ export const findHttpClientCallsWithZodOutput = (sourceFile: SourceFile) => {
 };
 
 /**
- * Finds all katalist get() calls that have generateSchema and interfaceName properties.
+ * Finds all katalist HTTP method calls that have generateSchema and interfaceName properties.
  *
- * This function searches through the source file for '.get()' expressions
+ * This function searches through the source file for HTTP method expressions (.get(), .post(), .put(), .delete())
  * and filters them to only include those that have generateSchema and interfaceName
  * properties in their options.
  *
  * @param sourceFile - The TypeScript source file to search in
- * @returns An array of CallExpression nodes representing katalist get() calls with schema generation
+ * @returns An array of CallExpression nodes representing katalist HTTP calls with schema generation
  *
  * @example
  * ```typescript
@@ -134,8 +134,8 @@ export const findKatalistCallsWithSchemaGeneration = (
 
 			const propertyName = expression.getName();
 
-			// Check if it's a .get() call
-			if (propertyName !== "get") {
+			// Check if it's an HTTP method call (get, post, put, delete)
+			if (!["get", "post", "put", "delete"].includes(propertyName)) {
 				return false;
 			}
 
@@ -145,8 +145,13 @@ export const findKatalistCallsWithSchemaGeneration = (
 				return false;
 			}
 
-			const optionsArg = args[1];
-			if (!Node.isObjectLiteralExpression(optionsArg)) {
+			// For GET and DELETE, options are the second argument
+			// For POST and PUT, options are the third argument (after data)
+			const optionsIndex =
+				propertyName === "get" || propertyName === "delete" ? 1 : 2;
+			const optionsArg = args[optionsIndex];
+
+			if (!optionsArg || !Node.isObjectLiteralExpression(optionsArg)) {
 				return false;
 			}
 
@@ -285,22 +290,39 @@ export const removeSchemaGenerationOptions = (
 	const katalistCalls = findKatalistCallsWithSchemaGeneration(sourceFile);
 
 	for (const call of katalistCalls) {
-		const args = call.getArguments();
-		if (args.length >= 2) {
-			const optionsArg = args[1];
-			if (Node.isObjectLiteralExpression(optionsArg)) {
-				const generateSchemaProperty = optionsArg.getProperty("generateSchema");
-				const interfaceNameProperty = optionsArg.getProperty("interfaceName");
-				const sourceFileProperty = optionsArg.getProperty("sourceFile");
+		const expression = call.getExpression();
+		if (!Node.isPropertyAccessExpression(expression)) {
+			continue;
+		}
 
-				if (generateSchemaProperty) {
-					generateSchemaProperty.remove();
-				}
-				if (interfaceNameProperty) {
-					interfaceNameProperty.remove();
-				}
-				if (sourceFileProperty) {
-					sourceFileProperty.remove();
+		const propertyName = expression.getName();
+		const args = call.getArguments();
+
+		if (args.length >= 2) {
+			// For GET and DELETE, options are the second argument
+			// For POST and PUT, options are the third argument (after data)
+			const optionsIndex =
+				propertyName === "get" || propertyName === "delete" ? 1 : 2;
+			const optionsArg = args[optionsIndex];
+
+			if (optionsArg && Node.isObjectLiteralExpression(optionsArg)) {
+				// Remove all schema generation properties to clean up the options object
+				const allProperties = optionsArg.getProperties();
+				for (const prop of allProperties) {
+					if (Node.isPropertyAssignment(prop)) {
+						const propName = prop.getName();
+						if (
+							[
+								"generateSchema",
+								"interfaceName",
+								"generateInputSchema",
+								"inputInterfaceName",
+								"sourceFile",
+							].includes(propName)
+						) {
+							prop.remove();
+						}
+					}
 				}
 			}
 		}
@@ -748,44 +770,134 @@ export const addSchemaTypeImports = (
  *
  * @param sourceFile - The TypeScript source file to process
  */
+/**
+ * Adds a schema type import if it doesn't already exist.
+ *
+ * @param sourceFile - The TypeScript source file to modify
+ * @param typeName - The type name to import (e.g., "PostSchemaType")
+ * @param existingImports - Array of existing import declarations
+ * @param httpSchemasBasePath - Base path for schema imports
+ */
+const addSchemaImportIfNotExists = (
+	sourceFile: SourceFile,
+	typeName: string,
+	existingImports: any[],
+	httpSchemasBasePath: string,
+): void => {
+	const namedImports = existingImports.flatMap((importDecl: any) =>
+		importDecl.getNamedImports(),
+	);
+	// Extract schema name from type (e.g., "PostSchemaType" -> "Post")
+	const schemaName = typeName.replace("SchemaType", "");
+
+	// Check if import already exists
+	const hasImport = namedImports.some(
+		(namedImport: any) => namedImport.getName() === typeName,
+	);
+
+	if (!hasImport) {
+		const moduleSpecifier = `${httpSchemasBasePath}/${schemaName}`;
+		sourceFile.addImportDeclaration({
+			namedImports: [typeName],
+			moduleSpecifier,
+			isTypeOnly: true,
+		});
+	}
+};
+
+/**
+ * Finds all katalist HTTP method calls that have generateInputSchema and inputInterfaceName properties.
+ *
+ * @param sourceFile - The TypeScript source file to search in
+ * @returns An array of CallExpression nodes representing katalist calls with input schema generation
+ */
+export const findKatalistCallsWithInputSchemaGeneration = (
+	sourceFile: SourceFile,
+) => {
+	return sourceFile
+		.getDescendantsOfKind(SyntaxKind.CallExpression)
+		.filter((callExpr) => {
+			const expression = callExpr.getExpression();
+			if (!Node.isPropertyAccessExpression(expression)) {
+				return false;
+			}
+
+			const propertyName = expression.getName();
+
+			// Only POST and PUT support input schema generation
+			if (!["post", "put"].includes(propertyName)) {
+				return false;
+			}
+
+			// Check if it has the required properties in options (third argument)
+			const args = callExpr.getArguments();
+			if (args.length < 3) {
+				return false;
+			}
+
+			const optionsArg = args[2];
+			if (!optionsArg || !Node.isObjectLiteralExpression(optionsArg)) {
+				return false;
+			}
+
+			const generateInputSchemaProp = optionsArg.getProperty(
+				"generateInputSchema",
+			);
+			const inputInterfaceNameProp =
+				optionsArg.getProperty("inputInterfaceName");
+
+			return Boolean(generateInputSchemaProp && inputInterfaceNameProp);
+		});
+};
+
 export const addKatalistSchemaImports = (sourceFile: SourceFile): void => {
 	const existingImports = sourceFile.getImportDeclarations();
 	const sourceFilePath = sourceFile.getFilePath();
 	const httpSchemasBasePath = calculateHttpSchemasPath(sourceFilePath);
 
-	// Find all katalist calls with type parameters
-	const katalistCalls = findKatalistCallsWithSchemaGeneration(sourceFile);
-
-	for (const callExpr of katalistCalls) {
-		const expression = callExpr.getExpression();
-		if (!Node.isPropertyAccessExpression(expression)) {
-			continue;
-		}
-
-		// Check if type arguments are present (meaning it was transformed)
+	// Handle output schema imports (all HTTP methods)
+	const outputKatalistCalls = findKatalistCallsWithSchemaGeneration(sourceFile);
+	for (const callExpr of outputKatalistCalls) {
 		const typeArguments = callExpr.getTypeArguments();
 		if (typeArguments.length > 0 && typeArguments[0]) {
 			const typeName = typeArguments[0].getText();
-			// Extract schema name from type (e.g., "PostSchemaType" -> "Post")
-			const schemaName = typeName.replace("SchemaType", "");
+			addSchemaImportIfNotExists(
+				sourceFile,
+				typeName,
+				existingImports,
+				httpSchemasBasePath,
+			);
+		}
+	}
 
-			// Check if import already exists
-			const hasImport = existingImports.some((importDecl) => {
-				const moduleSpecifier = importDecl.getModuleSpecifierValue();
-				const namedImports = importDecl.getNamedImports();
-				return (
-					moduleSpecifier.includes(schemaName) &&
-					namedImports.some((namedImport) => namedImport.getName() === typeName)
-				);
-			});
-
-			if (!hasImport) {
-				const moduleSpecifier = `${httpSchemasBasePath}/${schemaName}`;
-				sourceFile.addImportDeclaration({
-					namedImports: [typeName],
-					moduleSpecifier,
-					isTypeOnly: true,
-				});
+	// Handle input schema imports (POST and PUT only)
+	const inputKatalistCalls =
+		findKatalistCallsWithInputSchemaGeneration(sourceFile);
+	for (const callExpr of inputKatalistCalls) {
+		const args = callExpr.getArguments();
+		if (args.length >= 3) {
+			const optionsArg = args[2];
+			if (Node.isObjectLiteralExpression(optionsArg)) {
+				const inputInterfaceNameProp =
+					optionsArg.getProperty("inputInterfaceName");
+				if (
+					inputInterfaceNameProp &&
+					Node.isPropertyAssignment(inputInterfaceNameProp)
+				) {
+					const inputInterfaceNameInitializer =
+						inputInterfaceNameProp.getInitializer();
+					if (Node.isStringLiteral(inputInterfaceNameInitializer)) {
+						const inputInterfaceName =
+							inputInterfaceNameInitializer.getLiteralValue();
+						const typeName = `${inputInterfaceName}SchemaType`;
+						addSchemaImportIfNotExists(
+							sourceFile,
+							typeName,
+							existingImports,
+							httpSchemasBasePath,
+						);
+					}
+				}
 			}
 		}
 	}

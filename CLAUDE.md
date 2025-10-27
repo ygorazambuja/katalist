@@ -64,6 +64,43 @@ const response = await kat.get<UserSchemaType>(url);
 - **Automatic**: Minimal developer intervention required
 - **Bun Native**: Leverages Bun's performance and APIs
 
+## How Automatic Transformation Works
+
+### Caller File Detection
+The library automatically detects which file is calling the katalist methods using stack trace analysis:
+
+1. **In External Projects**: When installed as `node_modules/katalist`, it detects user files like `/myapp/src/api.ts`
+2. **In Development**: When developing katalist itself, it detects test files like `/katalist/tests/test.ts`
+3. **Cross-Platform**: Handles both Unix (`/`) and Windows (`\`) path separators
+
+### Filtering Logic
+The `getCallerFilePath()` function in `src/katalist.ts` filters out:
+- Files inside `/node_modules/katalist/` (the library itself when installed)
+- Files matching `/katalist/src/katalist.ts` (library source during development)
+- Files matching `/katalist/dist/index.*` (built library files)
+- All other `node_modules` files (dependencies like ky, ts-morph, etc.)
+
+This ensures it only transforms **user code**, never library code.
+
+### Transformation Flow
+1. User calls `kat.get(url, { generateSchema: true, interfaceName: "User" })`
+2. Library detects caller file path from stack trace
+3. HTTP request completes and response is intercepted
+4. Zod schema is generated and saved to `http-schemas/`
+5. **Transformer automatically runs** on the caller file:
+   - Adds type parameter: `<UserSchemaType>`
+   - Removes `generateSchema` and `interfaceName` props
+   - Adds import: `import type { UserSchemaType } from './http-schemas/User'`
+6. File is formatted with Biome and saved
+
+### Works in Any Project
+This mechanism works whether katalist is:
+- Installed via `npm install katalist` in an external project
+- Being developed locally
+- Used in monorepos or nested project structures
+
+The key is that it uses **relative path patterns** to identify library files, not absolute paths.
+
 ## Bun Development Guidelines
 
 ### Commands
